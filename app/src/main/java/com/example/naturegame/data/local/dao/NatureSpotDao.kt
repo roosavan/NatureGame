@@ -1,23 +1,39 @@
 package com.example.naturegame.data.local.dao
 
-import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.Query
+import androidx.room.*
 import com.example.naturegame.data.local.entity.NatureSpot
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Data Access Object (DAO) luontolöytöjen tietokantaoperaatioille.
+ *
+ * Tarjoaa CRUD-operaatiot NatureSpot-entiteetille Room-tietokannan kautta.
+ * Flow-paluuarvot mahdollistavat reaktiivisen UI-päivityksen Composessa.
+ */
 @Dao
 interface NatureSpotDao {
+
+    /** Lisää uusi löytö tai korvaa olemassa oleva samalla ID:llä (UPSERT-toiminto) */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(spot: NatureSpot): Long
+
+    /** Palauttaa kaikki löydöt aikajärjestyksessä (uusin ensin) reaktiivisena Flow-virtana */
     @Query("SELECT * FROM nature_spots ORDER BY timestamp DESC")
     fun getAllSpots(): Flow<List<NatureSpot>>
 
-    @Query("SELECT * FROM nature_spots WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
+    /** Palauttaa löydöt joilla on validi GPS-sijainti (kartalla näytettävät) */
+    @Query("SELECT * FROM nature_spots WHERE latitude != 0.0")
     fun getSpotsWithLocation(): Flow<List<NatureSpot>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertSpot(spot: NatureSpot)
+    /** Hakee synkronoimattomat löydöt Firebase-lähetystä varten */
+    @Query("SELECT * FROM nature_spots WHERE synced = 0")
+    suspend fun getUnsyncedSpots(): List<NatureSpot>
 
-    @Query("DELETE FROM nature_spots WHERE id = :id")
-    suspend fun deleteSpot(id: Long)
+    /** Merkitsee löydön synkronoiduksi ja tallentaa Firebase Storage -URL:n */
+    @Query("UPDATE nature_spots SET synced = 1, imageFirebaseUrl = :url WHERE id = :id")
+    suspend fun markSynced(id: String, url: String)
+
+    /** Poistaa löydön tietokannasta */
+    @Delete
+    suspend fun delete(spot: NatureSpot)
 }

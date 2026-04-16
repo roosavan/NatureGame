@@ -10,43 +10,39 @@ import com.example.naturegame.data.local.entity.NatureSpot
 import com.example.naturegame.data.local.entity.WalkSession
 
 /**
- * Sovelluksen pääasiallinen Room-tietokanta.
- * Sisältää taulut kävelykertojen (walk_sessions) ja luontokohteiden (nature_spots) tallentamiseen.
+ * Room-tietokannan pääluokka (Singleton-malli).
  *
- * Käyttää Singleton-mallia varmistaakseen, että vain yksi tietokantainstanssi
- * on kerrallaan auki.
+ * Hallinnoi SQLite-tietokantaa ja tarjoaa DAO-rajapinnat tietokantaoperaatioille.
+ * Käyttää fallbackToDestructiveMigration()-strategiaa kehitysvaiheessa,
+ * mikä tyhjentää tietokannan skeeman muuttuessa (tuotannossa käytettäisiin migraatiota).
  */
-@Database(entities = [WalkSession::class, NatureSpot::class], version = 1, exportSchema = false)
+@Database(
+    entities = [
+        NatureSpot::class,   // Luontolöydöt (viikko 4)
+        WalkSession::class   // Kävelysessiot (viikko 2)
+    ],
+    version = 2,             // Kasvatettu 1→2 koska lisättiin NatureSpot
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
-
-    /**
-     * Palauttaa DAO:n kävelykertojen käsittelyyn.
-     */
+    /** DAO luontolöytöjen tietokantaoperaatioille */
+    abstract fun natureSpotDao(): NatureSpotDao
+    /** DAO kävelysessioiden tietokantaoperaatioille */
     abstract fun walkSessionDao(): WalkSessionDao
 
-    /**
-     * Palauttaa DAO:n luontokohteiden käsittelyyn.
-     */
-    abstract fun natureSpotDao(): NatureSpotDao
-
     companion object {
-        @Volatile
-        private var INSTANCE: AppDatabase? = null
+        @Volatile private var INSTANCE: AppDatabase? = null
 
-        /**
-         * Palauttaa tai luo tietokantainstanssin (Singleton).
-         * @param context Sovelluksen konteksti
-         * @return AppDatabase-instanssi
-         */
+        /** Palauttaa tietokannan singleton-instanssin (thread-safe) */
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "nature_game_database"
-                ).build()
-                INSTANCE = instance
-                instance
+                    "luontopeli_database"
+                )
+                    .fallbackToDestructiveMigration()  // Kehitysvaiheessa OK
+                    .build().also { INSTANCE = it }
             }
         }
     }
