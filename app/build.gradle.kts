@@ -81,6 +81,7 @@ dependencies {
 
     // Accompanist Permissions — helpottaa lupapyyntöjä Composessa
     implementation(libs.accompanist.permissions)
+    implementation(libs.androidx.material3)
 
     // Compose BOM
     val composeBom = platform(libs.androidx.compose.bom)
