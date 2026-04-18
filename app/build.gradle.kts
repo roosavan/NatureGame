@@ -9,6 +9,7 @@ if (localPropertiesFile.exists()) {
 
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.google.services)  // Tarvitaan google-services.json:lle
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
@@ -55,7 +56,7 @@ android {
             )
         }
         debug {
-            applicationIdSuffix = ".debug"
+            // Poistettu applicationIdSuffix, jotta google-services.json täsmää
             versionNameSuffix = "-debug"
         }
     }
@@ -135,4 +136,12 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Firebase BOM – hallitsee kaikkien Firebase-kirjastojen versiot automaattisesti
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)       // Authentication – käyttäjätunnistus
+    implementation(libs.firebase.firestore)  // Firestore – löytöjen metadata pilveen
+
+    // Guava – ratkaisee Firebase + CameraX ListenableFuture -ristiriidan
+    implementation("com.google.guava:guava:32.1.3-android")
 }
