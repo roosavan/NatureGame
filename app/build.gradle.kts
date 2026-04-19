@@ -9,7 +9,7 @@ if (localPropertiesFile.exists()) {
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.google.services)  // Tarvitaan google-services.json:lle
+    alias(libs.plugins.google.services)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
@@ -30,7 +30,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // Signing config luodaan vain jos KEYSTORE_PATH on määritetty
+    // Signing config
     val keystorePath = localProperties.getProperty("KEYSTORE_PATH")
     if (!keystorePath.isNullOrBlank()) {
         signingConfigs {
@@ -56,7 +56,6 @@ android {
             )
         }
         debug {
-            // Poistettu applicationIdSuffix, jotta google-services.json täsmää
             versionNameSuffix = "-debug"
         }
     }
@@ -77,12 +76,10 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
-    // OpenStreetMap (osmdroid)
-    implementation(libs.osmdroid.android)
-
-    // Accompanist Permissions — helpottaa lupapyyntöjä Composessa
-    implementation(libs.accompanist.permissions)
     implementation(libs.androidx.material3)
+    
+    // Health Connect
+    implementation(libs.androidx.health.connect.client)
 
     // Compose BOM
     val composeBom = platform(libs.androidx.compose.bom)
@@ -93,7 +90,6 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.material.icons.extended)
 
-    // Navigation
     implementation(libs.androidx.navigation.compose)
 
     // Room
@@ -116,32 +112,26 @@ dependencies {
     implementation(libs.camera.view)
     implementation(libs.camera.extensions)
 
-    // Coil
+    // Coil & ML Kit
     implementation(libs.coil.compose)
-
-    // ML Kit
     implementation(libs.mlkit.image.labeling)
 
-    // Splash Screen
+    // Splash Screen & Permissions
     implementation(libs.androidx.core.splashscreen)
-
-    // Accompanist Permissions
     implementation(libs.accompanist.permissions)
 
-    // Test
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+
+    implementation("com.google.guava:guava:32.1.3-android")
+
+    // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(composeBom)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-
-    // Firebase BOM – hallitsee kaikkien Firebase-kirjastojen versiot automaattisesti
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth)       // Authentication – käyttäjätunnistus
-    implementation(libs.firebase.firestore)  // Firestore – löytöjen metadata pilveen
-
-    // Guava – ratkaisee Firebase + CameraX ListenableFuture -ristiriidan
-    implementation("com.google.guava:guava:32.1.3-android")
 }

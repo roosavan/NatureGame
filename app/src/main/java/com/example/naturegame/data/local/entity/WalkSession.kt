@@ -26,6 +26,7 @@ data class WalkSession(
     val endTime: Long? = null,
     val stepCount: Int = 0,
     val distanceMeters: Float = 0f,
+    val caloriesBurned: Double = 0.0, // Uusi kenttä kaloreille
     val spotsFound: Int = 0,
     val isActive: Boolean = true
 )

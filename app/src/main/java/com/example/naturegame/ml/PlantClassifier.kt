@@ -11,48 +11,43 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * ML Kit -pohjainen kasvin tunnistaja (on-device Image Labeling).
- * Käyttää Google ML Kit:n paikallista kuvatunnistusta.
- * ML Kit -malli toimii täysin laitteella (on-device).
+ * ML Kit -pohjainen luonnon tunnistaja (on-device Image Labeling).
+ * Tunnistaa kasvit, eläimet, linnut, hyönteiset ja sienet.
  */
 class PlantClassifier {
 
-    /** ML Kit Image Labeler -instanssi. Konfiguroitu 50% minimivarmuuskynnyksellä. */
     private val labeler = ImageLabeling.getClient(
         ImageLabelerOptions.Builder()
-            .setConfidenceThreshold(0.5f)
+            .setConfidenceThreshold(0.4f)
             .build()
     )
 
     /**
-     * Luontoon liittyvät avainsanat, joilla suodatetaan ML Kit:n tuloksia.
-     * Jos tunnistettu merkintä sisältää jonkin näistä sanoista...
+     * Laajennettu avainsanalista kattamaan eri luontokategoriat.
      */
     private val natureKeywords = setOf(
-        "plant", "flower", "tree", "shrub", "leaf", "fern", "moss",
-        "mushroom", "fungus", "grass", "herb", "bush", "berry",
-        "pine", "birch", "spruce", "algae", "lichen", "bark",
-        "nature", "forest", "woodland", "botanical", "flora"
+        // Kasvit
+        "plant", "flower", "tree", "shrub", "leaf", "fern", "moss", "grass", "herb", "bush", "flora",
+        // Eläimet ja nisäkkäät
+        "animal", "mammal", "wildlife", "fauna", "deer", "squirrel", "fox", "rabbit", "hare", "moose", "bear",
+        // Linnut
+        "bird", "avian", "owl", "eagle", "swan", "duck", "goose", "sparrow", "woodpecker",
+        // Hyönteiset ja niveljalkaiset
+        "insect", "bug", "butterfly", "moth", "beetle", "bee", "wasp", "ant", "spider", "dragonfly",
+        // Sienet
+        "mushroom", "fungus", "fungi", "toadstool",
+        // Yleiset luontosanat
+        "nature", "forest", "woodland", "wilderness", "outdoors"
     )
 
-    /**
-     * Analysoi kuvan ja tunnistaa siitä luontokohteet.
-     * Prosessi:
-     * 1. Luo InputImage kuvan URI:sta
-     * 2. Ajaa ML Kit Image Labeling -mallin
-     * 3. Suodattaa tuloksista luontoon liittyvät merkinnät
-     * 4. Palauttaa parhaan osuman
-     */
     suspend fun classify(imageUri: Uri, context: Context): ClassificationResult {
         return suspendCancellableCoroutine { continuation ->
             try {
-                // Luodaan ML Kit -yhteensopiva kuva URI:sta
                 val inputImage = InputImage.fromFilePath(context, imageUri)
 
-                // Ajetaan tunnistus asynkronisesti
                 labeler.process(inputImage)
                     .addOnSuccessListener { labels ->
-                        // Suodatetaan vain luontoon liittyvät merkinnät avainsanojen perusteella
+                        // Suodatetaan luontoon liittyvät merkinnät
                         val natureLabels = labels.filter { label ->
                             natureKeywords.any { keyword ->
                                 label.text.contains(keyword, ignoreCase = true)
@@ -60,20 +55,17 @@ class PlantClassifier {
                         }
 
                         val result = if (natureLabels.isNotEmpty()) {
-                            // Valitaan paras osuma varmuusasteen perusteella
                             val best = natureLabels.maxByOrNull { it.confidence }!!
                             ClassificationResult.Success(
-                                label = best.text,
+                                label = translateLabel(best.text), // Käännetään yleisimmät suomeksi
                                 confidence = best.confidence,
-                                allLabels = labels.take(5)  // Top 5 kaikista tunnistuksista
+                                allLabels = labels.take(5)
                             )
                         } else {
-                            // Kuva tunnistettiin mutta ei löytynyt luontokohteita
                             ClassificationResult.NotNature(
                                 allLabels = labels.take(3)
                             )
                         }
-
                         continuation.resume(result)
                     }
                     .addOnFailureListener { exception ->
@@ -85,40 +77,43 @@ class PlantClassifier {
         }
     }
 
-    /** Vapauttaa ML Kit -resurssit. Kutsutaan kun CameraViewModel tuhotaan. */
+    /**
+     * Yksinkertainen kääntäjä yleisimmille ML Kitin englanninkielisille termeille.
+     */
+    private fun translateLabel(label: String): String {
+        return when (label.lowercase()) {
+            "plant" -> "Kasvi"
+            "flower" -> "Kukka"
+            "tree" -> "Puu"
+            "bird" -> "Lintu"
+            "animal" -> "Eläin"
+            "mammal" -> "Nisäkäs"
+            "insect" -> "Hyönteinen"
+            "butterfly" -> "Perhonen"
+            "mushroom" -> "Sieni"
+            "fungus" -> "Sieni"
+            "leaf" -> "Lehti"
+            "squirrel" -> "Orava"
+            "forest" -> "Metsä"
+            else -> label.replaceFirstChar { it.uppercase() }
+        }
+    }
+
     fun close() {
         labeler.close()
     }
 }
 
-/**
- * Sealed class kuvatunnistuksen tulokselle.
- * Kolme mahdollista tilaa: Success, NotNature, Error.
- */
 sealed class ClassificationResult {
-    /**
-     * Onnistunut tunnistus – kuva sisältää luontokohteen.
-     * @property label Tunnistettu luontokohde
-     * @property confidence Varmuusaste 0.0 – 1.0
-     * @property allLabels Kaikki tunnistetut merkinnät
-     */
     data class Success(
         val label: String,
         val confidence: Float,
         val allLabels: List<ImageLabel>
     ) : ClassificationResult()
 
-    /**
-     * Kuva ei sisällä luontokohteita.
-     * @property allLabels Kaikki tunnistetut merkinnät
-     */
     data class NotNature(
         val allLabels: List<ImageLabel>
     ) : ClassificationResult()
 
-    /**
-     * Tunnistus epäonnistui.
-     * @property message Virheilmoitus
-     */
     data class Error(val message: String) : ClassificationResult()
 }

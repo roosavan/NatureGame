@@ -13,19 +13,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.naturegame.data.local.entity.NatureSpot
 import com.example.naturegame.viewmodel.MapViewModel
 import com.example.naturegame.viewmodel.WalkViewModel
 import com.example.naturegame.viewmodel.formatDuration
+import com.example.naturegame.viewmodel.formatDistance
 import com.example.naturegame.viewmodel.toFormattedDate
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import kotlinx.coroutines.delay
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -35,7 +38,6 @@ fun MapScreen(
 ) {
     val context = LocalContext.current
 
-    // --- Lupapyynti ---
     val permissionState = rememberMultiplePermissionsState(
         permissions = listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -43,10 +45,9 @@ fun MapScreen(
         )
     )
 
-    // ACTIVITY_RECOGNITION tarvitaan Android 10+ askelmittarille
     val activityRecognitionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* granted */ }
+    ) { }
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -54,7 +55,12 @@ fun MapScreen(
         }
     }
 
-    // Näytä lupapyyntö-UI jos luvat puuttuu
+    LaunchedEffect(permissionState.allPermissionsGranted) {
+        if (permissionState.allPermissionsGranted) {
+            mapViewModel.startTracking()
+        }
+    }
+
     if (!permissionState.allPermissionsGranted) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -70,47 +76,47 @@ fun MapScreen(
         return
     }
 
-    // --- Tila ---
     val isWalking by walkViewModel.isWalking.collectAsState()
     val routePoints by mapViewModel.routePoints.collectAsState()
-    val currentLocation by mapViewModel.currentLocation.collectAsState()
     val natureSpots by mapViewModel.natureSpots.collectAsState()
+    val currentLocation by mapViewModel.currentLocation.collectAsState()
 
-    // Aloita/lopeta sijaintiseuranta kävelyn tilan mukaan
-    LaunchedEffect(isWalking) {
-        if (isWalking) mapViewModel.startTracking()
-        else mapViewModel.stopTracking()
-    }
-
-    // Oulu oletussijaintina (koordinaatit: lat 65.01, lon 25.47)
-    val defaultPosition = GeoPoint(65.0121, 25.4651)
-
-    // Aseta osmdroidin User Agent — PAKOLLINEN, muuten kartta ei lataudu
     LaunchedEffect(Unit) {
         Configuration.getInstance().userAgentValue = context.packageName
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-
-        // --- Karttanäkymä ---
         Box(modifier = Modifier.weight(1f)) {
-
-            // remember: MapView-instanssi muistetaan rekompositionien yli
             val mapViewState = remember { MapView(context) }
+            
+            // Luodaan overlay kerran
+            val myLocationOverlay = remember {
+                MyLocationNewOverlay(GpsMyLocationProvider(context), mapViewState).apply {
+                    enableMyLocation()
+                    enableFollowLocation()
+                }
+            }
+
+            // Keskitytään viimeisimpään sijaintiin heti kun se on saatavilla (vain kerran alussa)
+            var hasInitiallyCentered by remember { mutableStateOf(false) }
+            LaunchedEffect(currentLocation) {
+                if (!hasInitiallyCentered && currentLocation != null) {
+                    mapViewState.controller.setCenter(GeoPoint(currentLocation!!.latitude, currentLocation!!.longitude))
+                    hasInitiallyCentered = true
+                }
+            }
 
             DisposableEffect(Unit) {
-                // Karttatyyli: MAPNIK = OpenStreetMap-oletustiilet
                 mapViewState.setTileSource(TileSourceFactory.MAPNIK)
-                // Mahdollista monisormipinch-zoom
                 mapViewState.setMultiTouchControls(true)
-                mapViewState.controller.setZoom(15.0)
-                mapViewState.controller.setCenter(
-                    currentLocation?.let { GeoPoint(it.latitude, it.longitude) }
-                        ?: defaultPosition
-                )
+                mapViewState.controller.setZoom(17.5)
+                
+                if (!mapViewState.overlays.contains(myLocationOverlay)) {
+                    mapViewState.overlays.add(myLocationOverlay)
+                }
 
                 onDispose {
-                    // Vapauta resurssit kun Composable poistuu
+                    myLocationOverlay.disableMyLocation()
                     mapViewState.onDetach()
                 }
             }
@@ -118,25 +124,25 @@ fun MapScreen(
             AndroidView(
                 factory = { mapViewState },
                 modifier = Modifier.fillMaxSize(),
-                // update kutsutaan kun routePoints, currentLocation tai natureSpots muuttuu
                 update = { mapView ->
-                    mapView.overlays.clear()
+                    // Tyhjennetään vain tarpeelliset (ei MyLocationOverlayta)
+                    val currentOverlays = mapView.overlays.toList()
+                    mapView.overlays.removeAll { it !is MyLocationNewOverlay }
 
-                    // --- Reittiviiiva (Polyline) ---
-                    if (routePoints.size >= 2) {
+                    // 1. Reittiviiva
+                    if (isWalking && routePoints.size >= 2) {
                         val polyline = Polyline().apply {
                             setPoints(routePoints)
-                            outlinePaint.color = 0xFF2E7D32.toInt()  // M3-vihreä
-                            outlinePaint.strokeWidth = 8f
+                            outlinePaint.color = 0xFF2E7D32.toInt()
+                            outlinePaint.strokeWidth = 10f
                         }
                         mapView.overlays.add(polyline)
                     }
 
-                    // --- Luontokohteiden markkerit ---
+                    // 2. Luontokohteet
                     natureSpots.forEach { spot ->
                         val marker = Marker(mapView).apply {
                             position = GeoPoint(spot.latitude, spot.longitude)
-                            // Näytä kasvin nimi tai kohteen nimi info-ikkunassa
                             title = spot.plantLabel ?: spot.name
                             snippet = spot.timestamp.toFormattedDate()
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -144,101 +150,72 @@ fun MapScreen(
                         mapView.overlays.add(marker)
                     }
 
-                    // --- Seuraa nykyistä sijaintia ---
-                    currentLocation?.let { loc ->
-                        mapView.controller.animateTo(GeoPoint(loc.latitude, loc.longitude))
-                    }
-
-                    mapView.invalidate()  // Piirretään kartta uudelleen
+                    // Huom: Poistettu manuaalinen animateTo, jotta MyLocationOverlay hoitaa seuraamisen sulavasti
+                    mapView.invalidate()
                 }
             )
         }
 
-        // --- Kävelytilasto-kortti alareunassa ---
         WalkStatsCard(walkViewModel)
     }
 }
 
-// --- Kävelytilasto-kortti alareunassa ---
 @Composable
 fun WalkStatsCard(viewModel: WalkViewModel) {
     val session by viewModel.currentSession.collectAsState()
     val isWalking by viewModel.isWalking.collectAsState()
+    var currentTime by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(isWalking) {
+        if (isWalking) {
+            while (true) {
+                delay(1000)
+                currentTime = System.currentTimeMillis()
+            }
+        }
+    }
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = if (isWalking) "Kävely käynnissä" else "Kävely pysäytetty",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                style = MaterialTheme.typography.titleSmall
             )
 
-            // Näytä tilastot vain jos sessio on olemassa
             session?.let { s ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "${s.stepCount}",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text("askelta", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = formatDistance(s.distanceMeters),
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text("matka", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = formatDuration(s.startTime),
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text("aika", style = MaterialTheme.typography.bodySmall)
-                    }
+                    StatItem("${s.stepCount}", "askelta")
+                    StatItem(formatDistance(s.distanceMeters), "matka")
+                    StatItem(formatDuration(s.startTime, if (isWalking) currentTime else (s.endTime ?: currentTime)), "aika")
+                    StatItem("${s.caloriesBurned.toInt()}", "kcal")
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
                 if (!isWalking) {
-                    Button(
-                        onClick = { viewModel.startWalk() },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Aloita kävely") }
+                    Button(onClick = { viewModel.startWalk() }, modifier = Modifier.weight(1f)) {
+                        Text("Aloita kävely")
+                    }
                 } else {
-                    OutlinedButton(
-                        onClick = { viewModel.stopWalk() },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Lopeta") }
+                    OutlinedButton(onClick = { viewModel.stopWalk() }, modifier = Modifier.weight(1f)) {
+                        Text("Lopeta")
+                    }
                 }
             }
         }
     }
 }
 
-/**
- * Muuntaa etäisyyden metreinä luettavaan muotoon (m tai km).
- */
-fun formatDistance(meters: Float): String {
-    return if (meters >= 1000) {
-        "%.2f km".format(meters / 1000f)
-    } else {
-        "${meters.toInt()} m"
+@Composable
+fun StatItem(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text = value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        Text(text = label, style = MaterialTheme.typography.labelSmall)
     }
 }
